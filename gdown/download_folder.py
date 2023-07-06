@@ -207,6 +207,7 @@ def download_folder(
     use_cookies=True,
     remaining_ok=False,
     verify=True,
+    resume=False,
     user_agent=None,
     resume=False,
     skip_download: bool = False,
