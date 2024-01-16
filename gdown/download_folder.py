@@ -12,8 +12,7 @@ import warnings
 
 import bs4
 
-from .download import _get_session
-from .download import download
+from .download import _get_session, download
 from .exceptions import FolderContentsMaximumLimitError
 
 MAX_NUMBER_FILES = 50
@@ -44,18 +43,12 @@ def _parse_google_drive_file(url, content):
 
         if "_DRIVE_ivd" in inner_html:
             # first js string is _DRIVE_ivd, the second one is the encoded arr
-            regex_iter = re.compile(r"'((?:[^'\\]|\\.)*)'").finditer(
-                inner_html
-            )
+            regex_iter = re.compile(r"'((?:[^'\\]|\\.)*)'").finditer(inner_html)
             # get the second elem in the iter
             try:
-                encoded_data = next(
-                    itertools.islice(regex_iter, 1, None)
-                ).group(1)
+                encoded_data = next(itertools.islice(regex_iter, 1, None)).group(1)
             except StopIteration:
-                raise RuntimeError(
-                    "Couldn't find the folder encoded JS string"
-                )
+                raise RuntimeError("Couldn't find the folder encoded JS string")
             break
 
     if encoded_data is None:
@@ -179,17 +172,11 @@ def _get_directory_structure(gdrive_file, previous_path):
     for file in gdrive_file.children:
         file.name = file.name.replace(osp.sep, "_")
         if file.is_folder():
-            directory_structure.append(
-                (None, osp.join(previous_path, file.name))
-            )
-            for i in _get_directory_structure(
-                file, osp.join(previous_path, file.name)
-            ):
+            directory_structure.append((None, osp.join(previous_path, file.name)))
+            for i in _get_directory_structure(file, osp.join(previous_path, file.name)):
                 directory_structure.append(i)
         elif not file.children:
-            directory_structure.append(
-                (file.id, osp.join(previous_path, file.name))
-            )
+            directory_structure.append((file.id, osp.join(previous_path, file.name)))
     return directory_structure
 
 
@@ -203,7 +190,8 @@ def download_folder(
     use_cookies=True,
     remaining_ok=False,
     verify=True,
-    resume=False
+    user_agent=None,
+    resume=False,
 ):
     """Downloads entire folder from URL.
 
@@ -229,6 +217,8 @@ def download_folder(
         Either a bool, in which case it controls whether the server's TLS
         certificate is verified, or a string, in which case it must be a path
         to a CA bundle to use. Default is True.
+    user_agent: str, optional
+        User-agent to use in the HTTP request.
 
     Returns
     -------
@@ -246,8 +236,11 @@ def download_folder(
         raise ValueError("Either url or id has to be specified")
     if id is not None:
         url = "https://drive.google.com/drive/folders/{id}".format(id=id)
+    if user_agent is None:
+        # We need to use different user agent for folder download c.f., file
+        user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36"  # NOQA: E501
 
-    sess = _get_session(proxy=proxy, use_cookies=use_cookies)
+    sess = _get_session(proxy=proxy, use_cookies=use_cookies, user_agent=user_agent)
 
     if not quiet:
         print("Retrieving folder contents", file=sys.stderr)
