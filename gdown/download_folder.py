@@ -1,3 +1,4 @@
+import collections
 import itertools
 import json
 import os
@@ -5,10 +6,13 @@ import os.path as osp
 import re
 import sys
 import warnings
+from typing import List
+from typing import Union
 
 import bs4
 
-from .download import _get_session, download
+from .download import _get_session
+from .download import download
 from .exceptions import FolderContentsMaximumLimitError
 from .parse_url import is_google_drive_url
 
@@ -187,6 +191,11 @@ def _get_directory_structure(gdrive_file, previous_path):
     return directory_structure
 
 
+GoogleDriveFileToDownload = collections.namedtuple(
+    "GoogleDriveFileToDownload", ("id", "path", "local_path")
+)
+
+
 def download_folder(
     url=None,
     id=None,
@@ -199,7 +208,8 @@ def download_folder(
     verify=True,
     user_agent=None,
     resume=False,
-):
+    skip_download: bool = False,
+) -> Union[List[str], List[GoogleDriveFileToDownload], None]:
     """Downloads entire folder from URL.
 
     Parameters
@@ -226,11 +236,16 @@ def download_folder(
         to a CA bundle to use. Default is True.
     user_agent: str, optional
         User-agent to use in the HTTP request.
+    skip_download: bool, optional
+        If True, return the list of files to download without downloading them.
+        Defaults to False.
 
     Returns
     -------
-    filenames: list of str
-        List of files downloaded, or None if failed.
+    files: List[str] or List[GoogleDriveFileToDownload] or None
+        If dry_run is False, list of local file paths downloaded or None if failed.
+        If dry_run is True, list of GoogleDriveFileToDownload that contains
+        id, path, and local_path.
 
     Example
     -------
@@ -251,54 +266,62 @@ def download_folder(
 
     if not quiet:
         print("Retrieving folder contents", file=sys.stderr)
-    return_code, gdrive_file = _download_and_parse_google_drive_link(
+    is_success, gdrive_file = _download_and_parse_google_drive_link(
         sess,
         url,
         quiet=quiet,
         remaining_ok=remaining_ok,
         verify=verify,
     )
+    if not is_success:
+        print("Failed to retrieve folder contents", file=sys.stderr)
+        return None
 
-    if not return_code:
-        return return_code
     if not quiet:
         print("Retrieving folder contents completed", file=sys.stderr)
         print("Building directory structure", file=sys.stderr)
+    directory_structure = _get_directory_structure(gdrive_file, previous_path="")
+    if not quiet:
+        print("Building directory structure completed", file=sys.stderr)
+
     if output is None:
         output = os.getcwd() + osp.sep
     if output.endswith(osp.sep):
-        root_folder = osp.join(output, gdrive_file.name)
+        root_dir = osp.join(output, gdrive_file.name)
     else:
-        root_folder = output
-    directory_structure = _get_directory_structure(gdrive_file, root_folder)
-    if not osp.exists(root_folder):
-        os.makedirs(root_folder)
+        root_dir = output
+    if not osp.exists(root_dir):
+        os.makedirs(root_dir)
 
-    if not quiet:
-        print("Building directory structure completed", file=sys.stderr)
-    filenames = []
-    for file_id, file_path in directory_structure:
-        if file_id is None:  # folder
-            if not osp.exists(file_path):
-                os.makedirs(file_path)
+    files = []
+    for id, path in directory_structure:
+        local_path = osp.join(root_dir, path)
+
+        if id is None:  # folder
+            if not skip_download and not osp.exists(local_path):
+                os.makedirs(local_path)
             continue
 
-        filename = download(
-            url="https://drive.google.com/uc?id=" + file_id,
-            output=file_path,
-            quiet=quiet,
-            proxy=proxy,
-            speed=speed,
-            use_cookies=use_cookies,
-            verify=verify,
-            resume=resume,
-        )
-
-        if filename is None:
-            if not quiet:
-                print("Download ended unsuccessfully", file=sys.stderr)
-            return
-        filenames.append(filename)
+        if skip_download:
+            files.append(
+                GoogleDriveFileToDownload(id=id, path=path, local_path=local_path)
+            )
+        else:
+            local_path = download(
+                url="https://drive.google.com/uc?id=" + id,
+                output=local_path,
+                quiet=quiet,
+                proxy=proxy,
+                speed=speed,
+                use_cookies=use_cookies,
+                verify=verify,
+                resume=resume,
+            )
+            if local_path is None:
+                if not quiet:
+                    print("Download ended unsuccessfully", file=sys.stderr)
+                return None
+            files.append(local_path)
     if not quiet:
         print("Download completed", file=sys.stderr)
-    return filenames
+    return files
