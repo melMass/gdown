@@ -209,7 +209,6 @@ def download_folder(
     verify=True,
     resume=False,
     user_agent=None,
-    resume=False,
     skip_download: bool = False,
 ) -> Union[List[str], List[GoogleDriveFileToDownload], None]:
     """Downloads entire folder from URL.
